@@ -8,6 +8,20 @@ module Time_unit = struct
   [@@deriving sexp, enumerate]
 end
 
+module Uuid = struct
+  type t
+end
+
+module Rev_mapping = struct
+  type t =
+    | Global of
+        ((int * int) list[@sexp.opaque])
+        * (string option list[@sexp.opaque])
+        * (Uuid.t[@sexp.opaque])
+    | Local of string option list
+  [@@deriving sexp_of]
+end
+
 type t =
   | Boolean
   | UInt8
@@ -28,5 +42,6 @@ type t =
   | Time
   | List of t
   | Null
+  | Categorical of Rev_mapping.t option
   | Unknown
-[@@deriving sexp]
+[@@deriving sexp_of]

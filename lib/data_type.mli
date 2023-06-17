@@ -8,6 +8,17 @@ module Time_unit : sig
   [@@deriving sexp, enumerate]
 end
 
+module Uuid : sig
+  type t
+end
+
+module Rev_mapping : sig
+  type t =
+    | Global of (int * int) list * string option list * Uuid.t
+    | Local of string option list
+  [@@deriving sexp_of]
+end
+
 type t =
   | Boolean
   | UInt8
@@ -28,5 +39,6 @@ type t =
   | Time
   | List of t
   | Null
+  | Categorical of Rev_mapping.t option
   | Unknown
-[@@deriving sexp]
+[@@deriving sexp_of]

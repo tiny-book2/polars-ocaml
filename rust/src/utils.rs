@@ -1,9 +1,37 @@
+use arrow2::array::Utf8Array;
 use ocaml_interop::{
     ocaml_alloc_tagged_block, ocaml_alloc_variant, ocaml_unpack_variant, DynBox, FromOCaml, OCaml,
-    OCamlRuntime, ToOCaml,
+    OCamlInt, OCamlList, OCamlRuntime, ToOCaml,
 };
 use polars::prelude::*;
 use std::borrow::Borrow;
+
+unsafe fn ocaml_failwith(error_message: &str) -> ! {
+    let error_message = std::ffi::CString::new(error_message).expect("CString::new failed");
+    unsafe {
+        ocaml_sys::caml_failwith(error_message.as_ptr());
+    }
+    unreachable!("ocaml_failwith should never return")
+}
+
+pub struct Abstract<T>(pub T);
+unsafe impl<T: 'static + Clone> FromOCaml<DynBox<T>> for Abstract<T> {
+    fn from_ocaml(v: OCaml<DynBox<T>>) -> Self {
+        Abstract(Borrow::<T>::borrow(&v).clone())
+    }
+}
+
+unsafe impl<T: 'static + Clone> ToOCaml<DynBox<T>> for Abstract<T> {
+    fn to_ocaml<'a>(&self, cr: &'a mut OCamlRuntime) -> OCaml<'a, DynBox<T>> {
+        // TODO: I don't fully understand why ToOCaml takes a &self, since that
+        // prevents us from using box_value without a clone() call.
+        OCaml::box_value(cr, self.0.clone())
+    }
+}
+
+pub fn unwrap_abstract_vec<T>(v: Vec<Abstract<T>>) -> Vec<T> {
+    v.into_iter().map(|Abstract(v)| v).collect()
+}
 
 pub struct PolarsTimeUnit(pub TimeUnit);
 
@@ -28,6 +56,64 @@ unsafe impl ToOCaml<TimeUnit> for PolarsTimeUnit {
                 TimeUnit::Nanoseconds,
                 TimeUnit::Microseconds,
                 TimeUnit::Milliseconds,
+            }
+        }
+    }
+}
+
+pub struct PolarsRevMapping(pub RevMapping);
+
+unsafe impl FromOCaml<RevMapping> for PolarsRevMapping {
+    fn from_ocaml(v: OCaml<RevMapping>) -> Self {
+        let result = ocaml_unpack_variant! {
+            v => {
+                RevMapping::Global(map: OCamlList<(OCamlInt,OCamlInt)>, cache: OCamlList<Option<String>>, uuid: DynBox<u128>) => {
+                    let map: Vec<(i64,i64)> = map;
+                    let map: Option<Vec<(u32, u32)>> = map.into_iter().map(|(k, v)| Some((k.try_into().ok()?, v.try_into().ok()?))).collect();
+                    let map: Option<PlHashMap<u32, u32>> = map.map(|vec| vec.into_iter().collect());
+                     match map {
+                         None => unsafe { ocaml_failwith("Failure when translating an PolarsRevMapping") },
+                         Some(map) => {
+                            let cache: Vec<Option<String>> = cache;
+                            let cache = Utf8Array::<i64>::from(cache);
+                            let Abstract(uuid) = uuid;
+                            RevMapping::Global(map, cache, uuid)
+                         }
+                     }
+                },
+                RevMapping::Local(cache: OCamlList<Option<String>>) => {
+                    let cache: Vec<Option<String>> = cache;
+                    let cache = Utf8Array::<i64>::from(cache);
+                    RevMapping::Local(cache)
+                }
+            }
+        };
+        PolarsRevMapping(result.expect("Failure when unpacking an OCaml<RevMapping> variant into PolarsRevMapping (unexpected tag value"))
+    }
+}
+
+unsafe impl ToOCaml<RevMapping> for PolarsRevMapping {
+    fn to_ocaml<'a>(&self, cr: &'a mut OCamlRuntime) -> OCaml<'a, RevMapping> {
+        let PolarsRevMapping(rev_mapping) = self;
+        unsafe {
+            match rev_mapping {
+                RevMapping::Global(map, cache, uuid) => {
+                    let map: Vec<(i64, i64)> =
+                        map.iter().map(|(k, v)| (*k as i64, *v as i64)).collect();
+                    let cache: Vec<Option<String>> = cache
+                        .into_iter()
+                        .map(|str| str.map(|str| str.to_string()))
+                        .collect();
+                    let uuid = Abstract(uuid.clone());
+                    ocaml_alloc_tagged_block!(cr, 0, map: OCamlList<(OCamlInt, OCamlInt)>, cache: OCamlList<Option<String>>, uuid: DynBox<u128>)
+                }
+                RevMapping::Local(cache) => {
+                    let cache: Vec<Option<String>> = cache
+                        .into_iter()
+                        .map(|str| str.map(|str| str.to_string()))
+                        .collect();
+                    ocaml_alloc_tagged_block!(cr, 1, cache: OCamlList<Option<String>>)
+                }
             }
         }
     }
@@ -65,6 +151,11 @@ unsafe impl FromOCaml<DataType> for PolarsDataType {
                     DataType::List(Box::new(datatype))
                 },
                 DataType::Null,
+                DataType::Categorical(rev_mapping: Option<RevMapping>) => {
+                    let rev_mapping: Option<PolarsRevMapping> = rev_mapping;
+                    let rev_mapping = rev_mapping.map(|PolarsRevMapping(rev_mapping)| Arc::new(rev_mapping));
+                    DataType::Categorical(rev_mapping)
+                },
                 DataType::Unknown,
             }
         };
@@ -112,27 +203,14 @@ unsafe impl ToOCaml<DataType> for PolarsDataType {
                     ocaml_alloc_tagged_block!(cr, 2,  datatype: DataType)
                 }
                 DataType::Null => ocaml_value(cr, 15),
+                DataType::Categorical(rev_mapping) => {
+                    let rev_mapping = rev_mapping
+                        .clone()
+                        .map(|rev_mapping| PolarsRevMapping(rev_mapping.as_ref().clone()));
+                    ocaml_alloc_tagged_block!(cr, 3,  rev_mapping: Option<RevMapping>)
+                }
                 DataType::Unknown => ocaml_value(cr, 16),
             }
         }
     }
-}
-
-pub struct Abstract<T>(pub T);
-unsafe impl<T: 'static + Clone> FromOCaml<DynBox<T>> for Abstract<T> {
-    fn from_ocaml(v: OCaml<DynBox<T>>) -> Self {
-        Abstract(Borrow::<T>::borrow(&v).clone())
-    }
-}
-
-unsafe impl<T: 'static + Clone> ToOCaml<DynBox<T>> for Abstract<T> {
-    fn to_ocaml<'a>(&self, cr: &'a mut OCamlRuntime) -> OCaml<'a, DynBox<T>> {
-        // TODO: I don't fully understand why ToOCaml takes a &self, since that
-        // prevents us from using box_value without a clone() call.
-        OCaml::box_value(cr, self.0.clone())
-    }
-}
-
-pub fn unwrap_abstract_vec<T>(v: Vec<Abstract<T>>) -> Vec<T> {
-    v.into_iter().map(|Abstract(v)| v).collect()
 }
