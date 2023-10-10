@@ -316,6 +316,7 @@ impl GADTDataType {
             GADTDataType::Float64 => DataType::Float64,
             GADTDataType::Utf8 => DataType::Utf8,
             GADTDataType::Binary => DataType::Binary,
+            GADTDataType::Date => DataType::Date,
             GADTDataType::List(data_type) => DataType::List(Box::new(data_type.to_data_type())),
         }
     }
