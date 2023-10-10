@@ -97,6 +97,7 @@ fn rust_expr_lit(
         GADTDataType::Float32 => lit(value.interpret::<OCamlFloat>(cr).to_rust::<f64>() as f32),
         GADTDataType::Float64 => lit(value.interpret::<OCamlFloat>(cr).to_rust::<f64>()),
         GADTDataType::Utf8 => lit(value.interpret::<String>(cr).to_rust::<String>()),
+        GADTDataType::Date => lit(value.interpret::<DynBox<NaiveDate>>(cr).to_rust::<chrono::naive::NaiveDate>()),
         GADTDataType::Binary => lit(value.interpret::<OCamlBytes>(cr).to_rust::<Vec<u8>>()),
         GADTDataType::List(data_type) => {
             // Since there is no direct way to create a List-based literal, we

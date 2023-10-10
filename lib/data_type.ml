@@ -65,6 +65,7 @@ module Typed = struct
     | Float64 : float t
     | Utf8 : string t
     | Binary : string t
+    | Date : Common.Naive_date.t t
     | List : 'a t -> 'a list t
     | Custom :
         { data_type : 'a t
@@ -89,6 +90,7 @@ module Typed = struct
     | Float64, Float64 -> Some Type_equal.T
     | Utf8, Utf8 -> Some Type_equal.T
     | Binary, Binary -> Some Type_equal.T
+    | Date, Date -> Some Type_equal.T
     | List t1, List t2 ->
       (match strict_type_equal t1 t2 with
        | None -> None
@@ -131,6 +133,7 @@ module Typed = struct
     | Float64 -> Float64
     | Utf8 -> Utf8
     | Binary -> Binary
+    | Date -> Date
     | List t -> List (to_untyped t)
     | Custom { data_type; f = _; f_inverse = _ } -> to_untyped data_type
   ;;
@@ -150,7 +153,8 @@ module Typed = struct
     | Utf8 -> Some (T Utf8)
     | Binary -> Some (T Binary)
     | List t -> of_untyped t |> Option.map ~f:(fun (T t) -> T (List t))
-    | Date | Datetime _ | Duration _ | Time | Null | Struct _ | Unknown -> None
+    | Date -> Some (T Date)
+    | Datetime _ | Duration _ | Time | Null | Struct _ | Unknown -> None
   ;;
 
   let rec sexp_of_packed (T t) =

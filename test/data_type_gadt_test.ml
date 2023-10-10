@@ -57,6 +57,14 @@ let rec value_generator : type a. a Data_type.Typed.t -> a Quickcheck.Generator.
     |> (* Core.String doesn't have a [is_valid_utf_8] function :( *)
     Generator.filter ~f:Stdlib.String.is_valid_utf_8
   | Binary -> Generator.string
+  | Date ->
+    let open Generator.Let_syntax in
+    let%map year =
+      (* Date.t doesn't support dates outside of years 0-9999 *)
+      Generator.int_inclusive 0 9999
+    and month = Generator.int_inclusive 1 12 >>| Month.of_int_exn
+    and day = Generator.int_inclusive 1 28 in
+    Date.create_exn ~y:year ~m:month ~d:day |> Common.Naive_date.of_date
   | List t -> value_generator t |> Generator.list
   | Custom { data_type; f; f_inverse = _ } ->
     value_generator data_type |> Generator.map ~f
@@ -79,6 +87,7 @@ let rec value_shrinker : type a. a Data_type.Typed.t -> a Quickcheck.Shrinker.t 
   | Float64 -> Shrinker.float
   | Utf8 -> Shrinker.string
   | Binary -> Shrinker.string
+  | Date -> Shrinker.atomic
   | List t ->
     value_shrinker t |> Shrinker.list |> Shrinker.filter ~f:(Fn.non List.is_empty)
   | Custom { data_type; f; f_inverse } ->
@@ -101,6 +110,7 @@ let rec value_to_sexp : type a. a Data_type.Typed.t -> a -> Sexp.t =
   | Float64 -> [%sexp_of: float] a
   | Utf8 -> [%sexp_of: string] a
   | Binary -> [%sexp_of: string] a
+  | Date -> [%sexp_of: Date.t] (Common.Naive_date.to_date_exn a)
   | List t ->
     let sexp_of_value = value_to_sexp t in
     [%sexp_of: value list] a
@@ -123,6 +133,7 @@ let rec value_compare : type a. a Data_type.Typed.t -> a -> a -> int =
   | Float64 -> [%compare: float] a b
   | Utf8 -> [%compare: string] a b
   | Binary -> [%compare: string] a b
+  | Date -> Comparable.lift [%compare: Date.t] ~f:Common.Naive_date.to_date_exn a b
   | List t -> List.compare (value_compare t) a b
   | Custom { data_type; f = _; f_inverse } ->
     Comparable.lift (value_compare data_type) ~f:f_inverse a b
